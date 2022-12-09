@@ -1,0 +1,1 @@
+INSERT INTO `client` VALUES (1003,'Orléans','Martin','Paul'),(1015,'Olivet','Dupont','Sylvie'),(1109,'La ferté','Dupond','Henri');

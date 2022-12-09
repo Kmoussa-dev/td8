@@ -1,0 +1,310 @@
+= AAR TP6 : Intégration avec Spring
+Frédéric Moal <frederic.moal@univ-orleans.fr>
+v1.2, 2019-10-18: spring boot 2.0.6
+ifndef::imagesdir[:imagesdir: ./images]
+ifndef::sourcedir[:sourcedir: ../java]
+ifndef::resourcesdir[:resourcesdir: ../resources]
+
+
+== Architecture standard avec Spring
+
+Le but de ce TP est de réaliser une architecture type java SE complète avec Spring
+
+image::tp2arch1.png[scaledwidth=100%]
+
+
+* Rappel des pré-requis
+
+** MySQL doit être lancé sur localhost
+
+** avec docker :
+[source,bash]
+docker run --name mysql -e MYSQL_ROOT_PASSWORD=root -p 3306:3306 -d mysql:5
+
+** Client Mysql avec docker :
+[source,bash]
+docker exec -it mysql mysql -u root -p
+
+
+== Exercice : en config XML
+
+Pour cela, vous allez reprendre les différentes couches (modele, dao, service)
+réalisées dans le TP précédent, mais en demandant à Spring de gérer les transactions
+et la création puis l'injection des couches les unes dans les autres.
+
+Voici les étapes à suivre pour ce nouveau projet/module maven
+
+=== Création du projet/module maven
+
+Pour commencer, il faut configurer ce nouveau projet/module maven pour utiliser Hibernate comme implémentation de JPA (2.2),
+en gardant le driver JDBC pour MySQL,
+ainsi qu'ajouter les dépendances minimum pour utiliser Spring.
+
+Dans votre pom.xml,
+[source,xml]
+----
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>fr.univ.orleans.aar</groupId>
+    <artifactId>tp2exo1</artifactId>
+    <version>1.0-SNAPSHOT</version>
+
+    <properties>
+        <maven.compiler.source>11</maven.compiler.source>
+        <maven.compiler.target>11</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>mysql</groupId>
+            <artifactId>mysql-connector-java</artifactId>
+            <version>8.0.21</version>
+        </dependency>
+        <dependency>
+            <groupId>org.hibernate</groupId>
+            <artifactId>hibernate-entitymanager</artifactId>
+            <version>5.4.23.Final</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-orm</artifactId>
+            <version>5.2.5.RELEASE</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-tx</artifactId>
+            <version>5.2.5.RELEASE</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-context</artifactId>
+            <version>5.2.5.RELEASE</version>
+        </dependency>
+    </dependencies>
+</project>
+----
+
+=== le modèle
+
+Récupérez les classes du modèle du TP précédent.
+
+
+=== Couche DAO
+
+Pour vous aider à écrire la couche DAO, ajoutez les classes :
+AbstractDao.java
+[source,java]
+----
+include::{sourcedir}/dao/AbstractDao.java[]
+----
+et jpa/AbstractDaoImpl.java :
+----
+include::{sourcedir}/dao/jpa/AbstractDaoImpl.java[]
+----
+
+Il suffit d'instancier pour chacune des 3 entités (Client, Compte, Livret) une interface et une classe d'implémentation ;
+voici par exemple la code de la DAO pour l'entité Client (par rapport au TP précédent on a retiré l'entitymanager) :
+
+----
+include::{sourcedir}/dao/ClientDao.java[]
+----
+
+----
+include::{sourcedir}/dao/jpa/ClientDaoImpl.java[]
+----
+
+[source,java]
+----
+// exemple de ClientDao
+
+// l'interface :
+public interface ClientDao extends AbstractDao<Client> {
+}
+
+// puis l'implémentation JPA :
+public class ClientDaoImpl extends AbstractDaoImpl<Client> implements ClientDao {
+    public ClientDaoImpl() {
+        this(Client.class);
+    }
+    public ClientDaoImpl(Class<Client> entityClass) {
+        super(entityClass);
+    }
+}
+----
+
+
+=== Configuration de Spring
+
+Pour complétez la configuration Spring ci-dessous, vous disposez de la refcardz Spring,
+ainsi que d'un squelette de fichier de configuration XML spring-config.xml :
+
+[source,xml]
+----
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:tx="http://www.springframework.org/schema/tx"
+    xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-2.0.xsd http://www.springframework.org/schema/tx http://www.springframework.org/schema/tx/spring-tx-2.0.xsd">
+
+    <!-- couches applicatives : DAO -->
+    <!-- A DEFINIR -->
+    <!-- couches applicatives : facade session, service -->
+    <!-- A DEFINIR AVEC INJECTION -->
+
+    <!-- Chargement d'un fichier de properties (jdbc.properties) pour la config JDBC (driver, login,...) -->
+    <bean class="org.springframework.beans.factory.config.PropertyPlaceholderConfigurer" >
+        <property name="locations" value="classpath:jdbc.properties" />
+    </bean>
+
+    <!-- Loading JPA -->
+    <bean id="entityManagerFactory" class="org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean">
+        <property name="dataSource" ref="dataSource" />
+        <property name="jpaVendorAdapter">
+            <bean class="org.springframework.orm.jpa.vendor.HibernateJpaVendorAdapter">
+            </bean>
+        </property>
+        <property name="jpaProperties">
+            <props>
+                <prop key="hibernate.dialect">org.hibernate.dialect.MySQL5Dialect</prop>
+                <prop key="hibernate.hbm2ddl.auto">create</prop>
+                <prop key="hibernate.connection.release_mode">after_transaction</prop>
+                <prop key="hibernate.show_sql">false</prop>
+            </props>
+        </property>
+        <property name="loadTimeWeaver">
+            <bean class="org.springframework.instrument.classloading.InstrumentationLoadTimeWeaver" />
+        </property>
+    </bean>
+
+    <!-- la source de données MySQL -->
+    <bean id="dataSource" class="org.springframework.jdbc.datasource.DriverManagerDataSource">
+        <property name="driverClassName" value="${jdbc.driverClassName}"/>
+        <property name="url" value="${jdbc.url}"/>
+        <property name="username" value="${jdbc.username}"/>
+        <property name="password" value="${jdbc.password}"/>
+    </bean>
+
+    <!-- le gestionnaire de transactions -->
+    <tx:annotation-driven transaction-manager="txManager" />
+    <bean id="txManager" class="org.springframework.orm.jpa.JpaTransactionManager">
+        <property name="entityManagerFactory" ref="entityManagerFactory" />
+    </bean>
+
+    <!-- traduction des exceptions -->
+    <bean class="org.springframework.dao.annotation.PersistenceExceptionTranslationPostProcessor" />
+
+    <!-- persistence -->
+    <bean class="org.springframework.orm.jpa.support.PersistenceAnnotationBeanPostProcessor" />
+
+</beans>
+----
+
+puis on ajoute le fichier `jdbc.properties` :
+[source,properties]
+----
+jdbc.driverClassName=com.mysql.jdbc.Driver
+jdbc.url=jdbc:mysql://localhost:3306/banque
+jdbc.username=root
+jdbc.password=root
+----
+
+=== Main de démo
+
+Pour tester tout ça, un petit programme Main ; *à adapter* en fonction de votre couche de Service évidemment :
+[source,java]
+----
+package run;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import org.springframework.context.ApplicationContext;
+import org.springframework.context.support.ClassPathXmlApplicationContext;
+import facade.BanqueService;
+import modele.*;
+
+public class SpringRun {
+    // couche service : SPRING
+    private static BanqueService service;
+    // constructeur
+    public static void main(String[] args) throws ParseException {
+        // configuration de l'application
+        ApplicationContext ctx =
+                new ClassPathXmlApplicationContext("spring-config.xml");
+        // récupération de la couche service
+        service = (BanqueService) ctx.getBean("banqueService");
+        // on vide la base
+        clean();
+        // on la remplit
+        fill();
+        // on vérifie visuellement
+        dumpClients();
+        dumpComptes();
+        dumpLivrets();
+        dumpClientsComptes();
+        virement();
+        dumpComptes();
+    }
+    private static void virement() {
+        service.virement(198, 205, 690.00);
+    }
+    // affichage contenu table Client
+    private static void dumpClients() {
+        System.out.format("[Clients]%n");
+        for (Client c : service.getAllClients()) {
+            System.out.print(c);
+            Client c2 = service.getClient(c.getId());
+            System.out.println("|"+c2);
+        }
+    }
+    // affichage contenu table Livret
+    private static void dumpLivrets() {
+        System.out.format("[Livrets]%n");
+        for (Livret a : service.getAllLivrets()) {
+            System.out.println(a);
+        }
+    }
+    // affichage des comptes
+    private static void dumpComptes() {
+        System.out.format("[Compte]%n");
+        for (Compte a : service.getAllComptes()) {
+            System.out.println(a);
+        }
+    }
+    // affichage des clients, avec leurs comptes respectifs
+    private static void dumpClientsComptes() {
+        System.out.println("[Clients/comptes]");
+        for (Client p : service.getAllClients()) {
+            for (Compte a : service.getComptesOfClient(p.getId())) {
+                System.out.format("[%s,%s]%n", p.getNom(), a.getId());
+            }
+        }
+    }
+    // remplissage tables
+    public static void fill() throws ParseException {
+        // crï¿½ation Clients
+        Client c1 = new Client(1003, "Martin", "Paul", "Orléans");
+        Client c2 = new Client(1015, "Dupont", "Sylvie", "Olivet");
+        Client c3 = new Client(1109, "Dupond", "Henri", "La ferté");
+
+        // ajout des Comptes/Livrets
+        c1.addCompte(new Compte(198,c1,2300.0,new SimpleDateFormat("dd/MM/yy").parse("31/01/2010")));
+        c2.addCompte(new Compte(203,c2,5440.0,new SimpleDateFormat("dd/MM/yy").parse("05/07/2001")));
+        c2.addCompte(new Livret(205,c2, 655.0,new SimpleDateFormat("dd/MM/yy").parse("05/07/2011"),0.05));
+        c3.addCompte(new Compte(243,c3, 450.0,new SimpleDateFormat("dd/MM/yy").parse("25/12/2013")));
+        // persistance des Clients avec leurs comptes/livrets
+        service.saveClients(new Client[]{c1,c2,c3});
+    }
+    // supression de tous les clients
+    public static void clean() {
+        // on supprime ttes les Clients et donc toutes les Comptes
+        for (Client Client : service.getAllClients()) {
+            service.deleteClient(Client.getId());
+        }
+    }
+}
+----
+

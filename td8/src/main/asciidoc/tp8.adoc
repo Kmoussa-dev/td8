@@ -1,0 +1,207 @@
+= AAR TP8 : Tests
+Frédéric Moal <frederic.moal@univ-orleans.fr>
+v1.1, 2018-10-26: migration Spring 5
+ifndef::imagesdir[:imagesdir: ./images]
+ifndef::sourcedir[:sourcedir: ../java]
+ifndef::resourcesdir[:resourcesdir: ../resources]
+
+
+== Architecture standard avec Spring
+
+Le but de ce TP est de mettre en place des Tests sur l'ensemble
+des couches développées dans les TPs précédents :
+
+image::tp3-arch1.png[]
+
+== Exercice 1 : Tests de la DAO
+
+Pour réaliser ces tests, il faut mettre en place un environnement spécifique
+pour la base de données - vous allez utiliser H2, une BD SQL Java en mémoire,
+qui va nous permettre de ré-initialiser facilement l'état de la base
+avant chaque test.
+
+Reprendre le TP 6 [spring en config XML] et dans le pom.xml, ajoutez la dépendance à H2 (com.h2database),
+à spring-test (org.springframework)
+et à junit (4) [attention, en scope test !]
+
+[source,xml]
+----
+    <dependency>
+        <groupId>org.springframework</groupId>
+        <artifactId>spring-test</artifactId>
+        <version>5.2.5.RELEASE</version>
+        <scope>test</scope>
+    </dependency>
+    <dependency>
+        <groupId>junit</groupId>
+        <artifactId>junit</artifactId>
+        <version>4.12</version>
+        <scope>test</scope>
+    </dependency>
+    <dependency>
+        <groupId>com.h2database</groupId>
+        <artifactId>h2</artifactId>
+        <version>1.4.182</version>
+        <scope>test</scope>
+    </dependency>
+----
+
+Copiez la configuration Spring initiale pour créer une config spécifique
+à l'environnement de test, et modifiez la configuration pour utiliser H2
+à la place de MySQL :
+
+[source,xml]
+----
+    <?xml version="1.0" encoding="UTF-8"?>
+    <beans xmlns="http://www.springframework.org/schema/beans"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns:context="http://www.springframework.org/schema/context"
+        xsi:schemaLocation="
+            http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+            http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context-3.0.xsd">
+
+        <!-- H2 dataSource for testing environnement -->
+        <bean id="dataSource" class="org.springframework.jdbc.datasource.LazyConnectionDataSourceProxy">
+            <constructor-arg>
+                <bean class="org.springframework.jdbc.datasource.SimpleDriverDataSource">
+                    <property name="driverClass" value="org.h2.Driver" />
+                    <property name="url" value="jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;TRACE_LEVEL_SYSTEM_OUT=2" />
+                </bean>
+            </constructor-arg>
+        </bean>
+
+        <!-- provides a H2 console to look into the db if necessary -->
+        <!--
+        <bean id="org.h2.tools.Server-WebServer" class="org.h2.tools.Server"
+                factory-method="createWebServer" depends-on="dataSource"
+                init-method="start" lazy-init="false">
+            <constructor-arg value="-web,-webPort,11111" />
+        </bean>
+         -->
+
+        <!-- Loading JPA -->
+        <bean id="entityManagerFactory" class="org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean">
+            <property name="dataSource" ref="dataSource" />
+            <property name="jpaVendorAdapter">
+                <bean class="org.springframework.orm.jpa.vendor.HibernateJpaVendorAdapter">
+                </bean>
+            </property>
+            <property name="jpaProperties">
+                <props>
+                    <prop key="hibernate.dialect">org.hibernate.dialect.H2Dialect</prop>
+                    <prop key="hibernate.hbm2ddl.auto">create</prop>
+                    <prop key="hibernate.connection.release_mode">after_transaction</prop>
+                    <prop key="hibernate.show_sql">false</prop>
+                </props>
+            </property>
+        </bean>
+
+        <!-- Transaction Manager -->
+        <bean id="transactionManager" class="org.springframework.orm.jpa.JpaTransactionManager">
+            <property name="entityManagerFactory" ref="entityManagerFactory"/>
+        </bean>
+
+        <!-- Command list scanning -->
+        <context:component-scan base-package="dao"/>
+    </beans>
+----
+
+Vous devez injecter cette datasource dans l'entity manager.
+
+Ajoutez un script sql de remplissage de la BD pour les tests
+    dans les resources de test, par exemple [à adapter au schéma de VOTRE BD] :
+
+[source,sql]
+INSERT INTO `client` VALUES (1003,'Orléans','Martin','Paul'),(1015,'Olivet','Dupont','Sylvie'),(1109,'La ferté','Dupond','Henri');
+INSERT INTO `compte` VALUES (198,'2010-01-31',2300,1003),(203,'2001-07-05',5440,1015),(243,'2013-12-25',450,1109);
+INSERT INTO `livret` VALUES (205,'2011-07-05',655,1015,0.05);
+
+Pour éviter de ré-écrire 3 fois le même code pour les 3 DAO,
+vous pouvez utiliser un squelette de test abstrait dao.AbstractDaoTest.java :
+
+
+[source,java]
+----
+package dao;
+
+    import javax.persistence.EntityManager;
+    import javax.persistence.PersistenceContext;
+    import javax.sql.DataSource;
+
+    import org.junit.Before;
+    import org.junit.runner.RunWith;
+    import org.springframework.beans.factory.annotation.Autowired;
+    import org.springframework.test.context.ContextConfiguration;
+    import org.springframework.test.context.junit4.AbstractTransactionalJUnit4SpringContextTests;
+    import org.springframework.test.context.junit4.SpringJUnit4ClassRunner;
+    import org.springframework.transaction.annotation.Transactional;
+
+    @RunWith(SpringJUnit4ClassRunner.class)
+    @ContextConfiguration(locations={"/spring-test.xml"})
+    @Transactional
+    public abstract class dao.AbstractDaoTest extends AbstractTransactionalJUnit4SpringContextTests {
+        @Autowired
+        DataSource dataSrc;
+        @PersistenceContext
+        private EntityManager em;
+
+        @Before
+        public void beforeTest() {
+            setDataSource(dataSrc);
+            super.executeSqlScript("classpath:banque-test.sql", false);
+        }
+        protected void flush() {
+            em.flush();
+        }
+        public DataSource getDataSrc() {
+            return dataSrc;
+        }
+        public void setDataSrc(DataSource dataSrc) {
+            this.dataSrc = dataSrc;
+        }
+    }
+----
+
+Ce squelette lance automatiquement le script sql avant chaque test.
+
+Pour écrire les Tests des Dao, il suffit d'hériter de cette classe abstraite
+et de tester les méthodes de la Dao correspondante (eg ClientDaoTest)
+
+Pour lancer vos tests, soit par IntelliJ, run As... JUnit Test,
+ou encore maven par un `mvn test`.
+
+
+=== Exercice 2 - Tests des services
+
+Pour tester la couche de service, par exemple la méthode virement, il faut créer des Mocks des différentes Dao dont elle dépend.
+
+Ajoutez EasyMock (org.easymock) aux dépendances du pom.xml
+(en scope test toujours)
+
+[source,xml]
+    <dependency>
+        <groupId>org.easymock</groupId>
+        <artifactId>easymock</artifactId>
+        <version>3.5.1</version>
+        <scope>test</scope>
+    </dependency>
+
+Créez une classe de test ServiceImplTest.java, dans laquelle
+vous instanciez l'implémentation du Service,
+mais en lui passant des Mocks de Dao au lieu des vraies Dao
+(méthode createMock(Interface.class)).
+
+- Testez la méthode de virement entre deux comptes
+(voir le cours de Yohan en M1 MIAGE Test et Qualité
+ou http://easymock.org/user-guide.html)
+
+- Modifiez la facade de service pour lever une exception `ClientNotFoundException`
+sur getClient(id) quand le client n'existe pas en base ;
+ajoutez les tests JUnit pour tester les deux situations.
+
+
+== Exercice 3 : Spring Boot reloaded
+
+Ré-écrire les mêmes tests mais pour la version Spring Boot de l'application
+
+cf le tuto : http://www.baeldung.com/spring-boot-testing
